@@ -13,7 +13,7 @@ const OWNER_PRIVATE_KEY =
   "74b6f20a44536c6f47eef19116e49c87ec74a32a8374376f56ac8232ed55cfb6";
 
 // Configuration
-const TEST_BET_ID = 13; // Using different bet
+const TEST_BET_ID = 4; // Using active bet
 const WINNER_CHOICE = "player1"; // Change to "player1" or "player2" to test different scenarios
 
 async function testWinnerFlexible() {
