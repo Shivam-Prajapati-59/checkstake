@@ -2,23 +2,21 @@
 pragma solidity ^0.8.13;
 
 import {Test} from "forge-std/Test.sol";
-import {Counter} from "../src/Counter.sol";
+import {ChessBetting} from "../src/Counter.sol";
 
+// Legacy test file - see ChessBetting.t.sol for comprehensive tests
 contract CounterTest is Test {
-    Counter public counter;
+    ChessBetting public chessBetting;
 
     function setUp() public {
-        counter = new Counter();
-        counter.setNumber(0);
+        chessBetting = new ChessBetting(250, 0.01 ether, 10 ether);
     }
 
-    function test_Increment() public {
-        counter.increment();
-        assertEq(counter.number(), 1);
-    }
-
-    function testFuzz_SetNumber(uint256 x) public {
-        counter.setNumber(x);
-        assertEq(counter.number(), x);
+    function test_Deployment() public {
+        assertEq(chessBetting.owner(), address(this));
+        assertEq(chessBetting.platformFeePercent(), 250);
+        assertEq(chessBetting.minBetAmount(), 0.01 ether);
+        assertEq(chessBetting.maxBetAmount(), 10 ether);
     }
 }
+
