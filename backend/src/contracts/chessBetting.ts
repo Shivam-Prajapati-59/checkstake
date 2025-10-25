@@ -151,6 +151,51 @@ export async function getPlayerStats(
 }
 
 /**
+ * Get all available bets (Created status - waiting for second player)
+ */
+export async function getAvailableBets(): Promise<any[]> {
+  if (!chessBettingContract || !isBlockchainEnabled) {
+    console.warn("Blockchain not enabled");
+    return [];
+  }
+
+  try {
+    const betCounter = await chessBettingContract.betCounter();
+    const availableBets = [];
+
+    // Query recent bets (last 50 for performance)
+    const startBetId = Math.max(1, Number(betCounter) - 50);
+    
+    for (let i = Number(betCounter); i >= startBetId; i--) {
+      try {
+        const bet = await chessBettingContract.bets(i);
+        
+        // Only include bets with "Created" status (0)
+        // Created = waiting for second player
+        if (Number(bet.status) === BetStatus.Created) {
+          availableBets.push({
+            betId: i,
+            player1: bet.player1,
+            amount: ethers.formatEther(bet.amount),
+            createdAt: Number(bet.createdAt),
+            gameHash: bet.gameHash,
+          });
+        }
+      } catch (error) {
+        // Skip bets that don't exist
+        continue;
+      }
+    }
+
+    console.log(`📋 Found ${availableBets.length} available bets`);
+    return availableBets;
+  } catch (error) {
+    console.error("Error getting available bets:", error);
+    return [];
+  }
+}
+
+/**
  * Check if bet is expired
  */
 export async function isBetExpired(betId: number): Promise<boolean> {
@@ -201,70 +246,167 @@ export async function getActiveBetsCount(): Promise<number> {
 }
 
 /**
- * Setup contract event listeners
+ * Setup contract event listeners using polling (compatible with Monad testnet)
+ * Monad doesn't support eth_newFilter, so we use block polling instead
  */
 export function setupContractListeners(io: any) {
-  if (!chessBettingContract || !isBlockchainEnabled) {
+  if (!chessBettingContract || !isBlockchainEnabled || !provider) {
     console.log(
       "ℹ️  Contract event listeners not set up (blockchain disabled)"
     );
     return;
   }
 
-  console.log("🎧 Setting up contract event listeners...");
+  console.log("🎧 Setting up contract event polling (Monad-compatible)...");
 
-  // Listen for new bets created
-  chessBettingContract.on("BetCreated", (betId, creator, amount, gameHash) => {
-    console.log(`📢 BetCreated event: ${betId} by ${creator}`);
-    io.emit("betCreated", {
-      betId: Number(betId),
-      creator,
-      amount: ethers.formatEther(amount),
-      gameHash,
-    });
-  });
+  let lastProcessedBlock = 0;
 
-  // Listen for bets joined
-  chessBettingContract.on("BetJoined", (betId, joiner, totalPool) => {
-    console.log(`📢 BetJoined event: ${betId} joined by ${joiner}`);
-    io.emit("betJoined", {
-      betId: Number(betId),
-      joiner,
-      totalPool: ethers.formatEther(totalPool),
-    });
-  });
+  // Poll for new blocks and query events
+  const pollEvents = async () => {
+    try {
+      if (!provider || !chessBettingContract) return;
 
-  // Listen for completed bets
-  chessBettingContract.on("BetCompleted", (betId, winner, payout, result) => {
-    console.log(`📢 BetCompleted event: ${betId} won by ${winner}`);
-    io.emit("betCompleted", {
-      betId: Number(betId),
-      winner,
-      payout: ethers.formatEther(payout),
-      result: Number(result),
-    });
-  });
+      const currentBlock = await provider.getBlockNumber();
 
-  // Listen for draws
-  chessBettingContract.on("DrawDeclared", (betId, refundAmount) => {
-    console.log(`📢 DrawDeclared event: ${betId}`);
-    io.emit("drawDeclared", {
-      betId: Number(betId),
-      refundAmount: ethers.formatEther(refundAmount),
-    });
-  });
+      // Initialize lastProcessedBlock on first run
+      if (lastProcessedBlock === 0) {
+        lastProcessedBlock = currentBlock;
+        console.log(`📍 Starting event polling from block ${currentBlock}`);
+        return;
+      }
 
-  // Listen for cancelled bets
-  chessBettingContract.on("BetCancelled", (betId, canceller, refundAmount) => {
-    console.log(`📢 BetCancelled event: ${betId}`);
-    io.emit("betCancelled", {
-      betId: Number(betId),
-      canceller,
-      refundAmount: ethers.formatEther(refundAmount),
-    });
-  });
+      // Only query if there are new blocks
+      if (currentBlock > lastProcessedBlock) {
+        const fromBlock = lastProcessedBlock + 1;
+        const toBlock = currentBlock;
 
-  console.log("✅ Contract event listeners set up successfully");
+        // Query events using queryFilter (doesn't use eth_newFilter)
+        try {
+          // Get BetCreated events
+          const betCreatedEvents = await chessBettingContract.queryFilter(
+            chessBettingContract.filters.BetCreated(),
+            fromBlock,
+            toBlock
+          );
+
+          for (const event of betCreatedEvents) {
+            if ("args" in event && event.args) {
+              const args = event.args as any;
+              console.log(
+                `📢 BetCreated event: ${args.betId} by ${args.creator}`
+              );
+              io.emit("betCreated", {
+                betId: Number(args.betId),
+                creator: args.creator,
+                amount: ethers.formatEther(args.amount),
+                gameHash: args.gameHash,
+              });
+            }
+          }
+
+          // Get BetJoined events
+          const betJoinedEvents = await chessBettingContract.queryFilter(
+            chessBettingContract.filters.BetJoined(),
+            fromBlock,
+            toBlock
+          );
+
+          for (const event of betJoinedEvents) {
+            if ("args" in event && event.args) {
+              const args = event.args as any;
+              console.log(
+                `📢 BetJoined event: ${args.betId} joined by ${args.joiner}`
+              );
+              io.emit("betJoined", {
+                betId: Number(args.betId),
+                joiner: args.joiner,
+                totalPool: ethers.formatEther(args.totalPool),
+              });
+            }
+          }
+
+          // Get BetCompleted events
+          const betCompletedEvents = await chessBettingContract.queryFilter(
+            chessBettingContract.filters.BetCompleted(),
+            fromBlock,
+            toBlock
+          );
+
+          for (const event of betCompletedEvents) {
+            if ("args" in event && event.args) {
+              const args = event.args as any;
+              console.log(
+                `📢 BetCompleted event: ${args.betId} won by ${args.winner}`
+              );
+              io.emit("betCompleted", {
+                betId: Number(args.betId),
+                winner: args.winner,
+                payout: ethers.formatEther(args.payout),
+                result: Number(args.result),
+              });
+            }
+          }
+
+          // Get DrawDeclared events
+          const drawDeclaredEvents = await chessBettingContract.queryFilter(
+            chessBettingContract.filters.DrawDeclared(),
+            fromBlock,
+            toBlock
+          );
+
+          for (const event of drawDeclaredEvents) {
+            if ("args" in event && event.args) {
+              const args = event.args as any;
+              console.log(`📢 DrawDeclared event: ${args.betId}`);
+              io.emit("drawDeclared", {
+                betId: Number(args.betId),
+                refundAmount: ethers.formatEther(args.refundAmount),
+              });
+            }
+          }
+
+          // Get BetCancelled events
+          const betCancelledEvents = await chessBettingContract.queryFilter(
+            chessBettingContract.filters.BetCancelled(),
+            fromBlock,
+            toBlock
+          );
+
+          for (const event of betCancelledEvents) {
+            if ("args" in event && event.args) {
+              const args = event.args as any;
+              console.log(`📢 BetCancelled event: ${args.betId}`);
+              io.emit("betCancelled", {
+                betId: Number(args.betId),
+                canceller: args.canceller,
+                refundAmount: ethers.formatEther(args.refundAmount),
+              });
+            }
+          }
+        } catch (queryError) {
+          console.error("Error querying events:", queryError);
+        }
+
+        lastProcessedBlock = currentBlock;
+      }
+    } catch (error) {
+      console.error("Error polling events:", error);
+    }
+  };
+
+  // Poll every 3 seconds (Monad has fast block times)
+  const pollingInterval = setInterval(pollEvents, 3000);
+
+  // Initial poll
+  pollEvents();
+
+  console.log("✅ Contract event polling set up successfully (3s interval)");
+
+  // Return cleanup function
+  return () => {
+    clearInterval(pollingInterval);
+    console.log("🛑 Contract event polling stopped");
+  };
 }
 
 // Export blockchain status
