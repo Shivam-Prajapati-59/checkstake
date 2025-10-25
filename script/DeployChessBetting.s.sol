@@ -10,25 +10,21 @@ contract DeployChessBetting is Script {
         uint256 platformFeePercent = 250; // 2.5%
         uint256 minBetAmount = 0.01 ether;
         uint256 maxBetAmount = 10 ether;
-        
+
         console2.log("Deploying ChessBetting contract...");
         console2.log("Platform Fee: 2.5%");
         console2.log("Min Bet:", minBetAmount);
         console2.log("Max Bet:", maxBetAmount);
-        
+
         vm.startBroadcast();
-        
-        ChessBetting chessBetting = new ChessBetting(
-            platformFeePercent,
-            minBetAmount,
-            maxBetAmount
-        );
-        
+
+        ChessBetting chessBetting = new ChessBetting(platformFeePercent, minBetAmount, maxBetAmount);
+
         vm.stopBroadcast();
-        
+
         console2.log("ChessBetting deployed at:", address(chessBetting));
         console2.log("Owner:", chessBetting.owner());
-        
+
         return chessBetting;
     }
 }
@@ -40,26 +36,22 @@ contract DeployTestnet is Script {
         uint256 platformFeePercent = 200; // 2%
         uint256 minBetAmount = 0.001 ether; // Lower for testing
         uint256 maxBetAmount = 100 ether; // Higher for testing
-        
+
         console2.log("Deploying ChessBetting to TESTNET...");
         console2.log("Platform Fee: 2%");
         console2.log("Min Bet:", minBetAmount);
         console2.log("Max Bet:", maxBetAmount);
-        
+
         vm.startBroadcast();
-        
-        ChessBetting chessBetting = new ChessBetting(
-            platformFeePercent,
-            minBetAmount,
-            maxBetAmount
-        );
-        
+
+        ChessBetting chessBetting = new ChessBetting(platformFeePercent, minBetAmount, maxBetAmount);
+
         vm.stopBroadcast();
-        
+
         console2.log("\n=== Deployment Successful ===");
         console2.log("Contract Address:", address(chessBetting));
         console2.log("Owner:", chessBetting.owner());
-        
+
         return chessBetting;
     }
 }

@@ -14,12 +14,11 @@ contract CounterScript is Script {
 
         // Deploy with default parameters
         chessBetting = new ChessBetting(
-            250,                    // 2.5% platform fee
-            0.01 ether,            // Min bet
-            10 ether               // Max bet
+            250, // 2.5% platform fee
+            0.01 ether, // Min bet
+            10 ether // Max bet
         );
 
         vm.stopBroadcast();
     }
 }
-

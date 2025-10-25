@@ -19,4 +19,3 @@ contract CounterTest is Test {
         assertEq(chessBetting.maxBetAmount(), 10 ether);
     }
 }
-
