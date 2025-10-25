@@ -201,7 +201,10 @@ io.on("connection", (socket: Socket) => {
   // Create new game
   socket.on("createGame", async (data: CreateGamePayload) => {
     try {
-      const gameId = `game_${Date.now()}_${socket.id.slice(0, 6)}`;
+      // Use betId as gameId for consistency - this ensures Player 2 can find the game
+      const gameId = data.betId
+        ? `game_${data.betId}`
+        : `game_${Date.now()}_${socket.id.slice(0, 6)}`;
       const chess = new Chess();
 
       const gameState: GameState = {
@@ -288,9 +291,14 @@ io.on("connection", (socket: Socket) => {
   // Join existing game
   socket.on("joinGame", async (data: JoinGamePayload) => {
     try {
+      console.log(`🎮 Player attempting to join game: ${data.gameId}`);
+      console.log(`   Player address: ${data.playerAddress}`);
+
       const game = games.get(data.gameId);
 
       if (!game) {
+        console.error(`❌ Game not found: ${data.gameId}`);
+        console.log(`   Available games:`, Array.from(games.keys()));
         emitError(socket, "Game not found");
         return;
       }

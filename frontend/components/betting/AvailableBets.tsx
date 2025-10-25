@@ -11,8 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Loader2, Users, Coins, Clock } from "lucide-react";
-import { formatEther } from "viem";
+import { Loader2, Users, Coins, Clock, RefreshCw } from "lucide-react";
 
 interface BetInfo {
   betId: number;
@@ -32,6 +31,8 @@ export function AvailableBets({
 }: AvailableBetsProps) {
   const [bets, setBets] = useState<BetInfo[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 
   useEffect(() => {
     fetchAvailableBets();
@@ -39,22 +40,35 @@ export function AvailableBets({
     return () => clearInterval(interval);
   }, []);
 
-  const fetchAvailableBets = async () => {
+  const fetchAvailableBets = async (manual = false) => {
+    if (manual) setIsRefreshing(true);
+
     try {
+      console.log("🔄 Fetching available bets...");
       const response = await fetch(
         `${
           process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5000"
         }/api/bets/available`
       );
+
       if (response.ok) {
         const data = await response.json();
+        console.log("📋 Received bets:", data);
         setBets(data.bets || []);
+        setLastUpdate(new Date());
+      } else {
+        console.error("❌ Failed to fetch bets:", response.status);
       }
     } catch (error) {
-      console.error("Error fetching bets:", error);
+      console.error("❌ Error fetching bets:", error);
     } finally {
       setIsLoading(false);
+      if (manual) setIsRefreshing(false);
     }
+  };
+
+  const handleManualRefresh = () => {
+    fetchAvailableBets(true);
   };
 
   const formatAddress = (address: string) => {
@@ -88,11 +102,37 @@ export function AvailableBets({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Users className="w-5 h-5" />
-          Available Bets
-        </CardTitle>
-        <CardDescription>Join an existing bet to start playing</CardDescription>
+        <div className="flex items-center justify-between">
+          <div className="flex-1">
+            <CardTitle className="flex items-center gap-2">
+              <Users className="w-5 h-5" />
+              Available Bets
+              {bets.length > 0 && (
+                <Badge variant="secondary" className="ml-2">
+                  {bets.length}
+                </Badge>
+              )}
+            </CardTitle>
+            <CardDescription>
+              Join an existing bet to start playing
+            </CardDescription>
+            {lastUpdate && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Updated: {lastUpdate.toLocaleTimeString()}
+              </p>
+            )}
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleManualRefresh}
+            disabled={isRefreshing}
+          >
+            <RefreshCw
+              className={`w-4 h-4 ${isRefreshing ? "animate-spin" : ""}`}
+            />
+          </Button>
+        </div>
       </CardHeader>
       <CardContent>
         {bets.length === 0 ? (
