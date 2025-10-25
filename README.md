@@ -1,8 +1,10 @@
-# ♟️ Chess Betting DApp
+# ♟️ CheckStake
 
 A decentralized peer-to-peer chess betting platform built on **Monad Testnet** with real-time gameplay and blockchain-based prize distribution.
 
-## 🎯 Features
+## ---
+
+Built with ❤️ for the Monad Hackathon | **CheckStake** - Where Chess Meets BlockchainFeatures
 
 - **Real-time Chess Gameplay** - Play live games using Socket.IO
 - **Smart Contract Betting** - Create and join bets with cryptocurrency
