@@ -79,12 +79,9 @@ export default function Home() {
       const hash = await joinBet(betId, amount);
       if (hash) {
         toast.success("Joined bet! Joining game...");
-        // Wait a bit for blockchain confirmation
-        setTimeout(() => {
-          // Try to join the game - backend will verify the bet
-          joinGame(`game_${betId}`, betId);
-          setShowBetting(false);
-        }, 2000);
+        // Transaction is now confirmed, join the game immediately
+        joinGame(`game_${betId}`, betId);
+        setShowBetting(false);
       }
     } catch (error) {
       console.error("Error joining bet:", error);

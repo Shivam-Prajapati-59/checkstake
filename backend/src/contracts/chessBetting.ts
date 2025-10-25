@@ -150,8 +150,14 @@ export async function getPlayerStats(
   }
 }
 
+// Cache for available bets
+let cachedAvailableBets: any[] = [];
+let lastCacheUpdate = 0;
+const CACHE_DURATION = 10000; // 10 seconds cache
+
 /**
  * Get all available bets (Created status - waiting for second player)
+ * Uses caching to reduce RPC calls and avoid rate limits
  */
 export async function getAvailableBets(): Promise<any[]> {
   if (!chessBettingContract || !isBlockchainEnabled) {
@@ -159,20 +165,47 @@ export async function getAvailableBets(): Promise<any[]> {
     return [];
   }
 
+  // Return cached data if still valid
+  const now = Date.now();
+  if (
+    now - lastCacheUpdate < CACHE_DURATION &&
+    cachedAvailableBets.length > 0
+  ) {
+    console.log(
+      `📋 Returning ${cachedAvailableBets.length} cached available bets`
+    );
+    return cachedAvailableBets;
+  }
+
+  console.log(
+    `🔄 Cache expired or empty, fetching fresh data from blockchain...`
+  );
+
   try {
     const betCounter = await chessBettingContract.betCounter();
     const availableBets = [];
 
-    // Query recent bets (last 50 for performance)
-    const startBetId = Math.max(1, Number(betCounter) - 50);
-    
+    // Query recent bets (last 20 to reduce RPC calls)
+    const startBetId = Math.max(1, Number(betCounter) - 19);
+    const totalBets = Number(betCounter) - startBetId + 1;
+
+    console.log(
+      `🔍 Querying ${totalBets} recent bets (${startBetId} to ${betCounter})`
+    );
+
+    // Add delay between calls to respect rate limits (25/sec = 40ms between calls)
     for (let i = Number(betCounter); i >= startBetId; i--) {
       try {
         const bet = await chessBettingContract.bets(i);
-        
+
+        console.log(
+          `   Bet ${i}: status=${Number(bet.status)}, player2=${bet.player2}`
+        );
+
         // Only include bets with "Created" status (0)
         // Created = waiting for second player
         if (Number(bet.status) === BetStatus.Created) {
+          console.log(`   ✅ Including bet ${i} (Created status)`);
           availableBets.push({
             betId: i,
             player1: bet.player1,
@@ -180,18 +213,33 @@ export async function getAvailableBets(): Promise<any[]> {
             createdAt: Number(bet.createdAt),
             gameHash: bet.gameHash,
           });
+        } else {
+          console.log(`   ❌ Skipping bet ${i} (status=${Number(bet.status)})`);
         }
+
+        // Small delay to respect rate limits (50ms = 20 calls/sec)
+        await new Promise((resolve) => setTimeout(resolve, 50));
       } catch (error) {
         // Skip bets that don't exist
+        console.log(`   ⚠️  Error fetching bet ${i}:`, error);
         continue;
       }
     }
 
-    console.log(`📋 Found ${availableBets.length} available bets`);
+    // Update cache
+    cachedAvailableBets = availableBets;
+    lastCacheUpdate = now;
+
+    console.log(
+      `📋 Found ${availableBets.length} available bets (cached for ${
+        CACHE_DURATION / 1000
+      }s)`
+    );
     return availableBets;
   } catch (error) {
     console.error("Error getting available bets:", error);
-    return [];
+    // Return cached data if available on error
+    return cachedAvailableBets;
   }
 }
 
@@ -394,13 +442,13 @@ export function setupContractListeners(io: any) {
     }
   };
 
-  // Poll every 3 seconds (Monad has fast block times)
-  const pollingInterval = setInterval(pollEvents, 3000);
+  // Poll every 5 seconds (increased to reduce RPC load and avoid rate limits)
+  const pollingInterval = setInterval(pollEvents, 5000);
 
   // Initial poll
   pollEvents();
 
-  console.log("✅ Contract event polling set up successfully (3s interval)");
+  console.log("✅ Contract event polling set up successfully (5s interval)");
 
   // Return cleanup function
   return () => {

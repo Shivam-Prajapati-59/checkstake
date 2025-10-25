@@ -9,6 +9,7 @@ import {
   declareWinner,
   declareDraw,
   getPlayerStats,
+  getAvailableBets,
   setupContractListeners,
   getBetCounter,
   getActiveBetsCount,
@@ -55,6 +56,11 @@ const addressToSocket: Map<string, string> = new Map();
 
 // Setup contract event listeners
 setupContractListeners(io);
+
+// Helper function for consistent error messaging
+const emitError = (socket: Socket, message: string) => {
+  socket.emit("error", { message });
+};
 
 // HTTP Routes
 app.get("/", (req: Request, res: Response) => {
@@ -162,6 +168,26 @@ app.get("/api/blockchain/status", async (req: Request, res: Response) => {
   }
 });
 
+// Get available bets (Created status - waiting for second player)
+app.get("/api/bets/available", async (req: Request, res: Response) => {
+  try {
+    const availableBets = await getAvailableBets();
+
+    res.json({
+      success: true,
+      bets: availableBets,
+      count: availableBets.length,
+    });
+  } catch (error: any) {
+    console.error("Error fetching available bets:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      bets: [],
+    });
+  }
+});
+
 // Socket.io Connection Handler
 io.on("connection", (socket: Socket) => {
   console.log(`🔌 Player connected: ${socket.id}`);
@@ -203,7 +229,7 @@ io.on("connection", (socket: Socket) => {
         const betDetails = await getBetDetails(data.betId);
 
         if (!betDetails) {
-          socket.emit("error", "Bet not found");
+          emitError(socket, "Bet not found");
           return;
         }
 
@@ -211,7 +237,7 @@ io.on("connection", (socket: Socket) => {
           betDetails.status !== BetStatus.Active &&
           betDetails.status !== BetStatus.Created
         ) {
-          socket.emit("error", "Bet is not active");
+          emitError(socket, "Bet is not active");
           return;
         }
 
@@ -222,7 +248,7 @@ io.on("connection", (socket: Socket) => {
             data.playerAddress.toLowerCase() &&
           betDetails.player2.toLowerCase() !== data.playerAddress.toLowerCase()
         ) {
-          socket.emit("error", "You are not part of this bet");
+          emitError(socket, "You are not part of this bet");
           return;
         }
 
@@ -234,6 +260,9 @@ io.on("connection", (socket: Socket) => {
       if (data.playerAddress) {
         addressToSocket.set(data.playerAddress.toLowerCase(), socket.id);
       }
+
+      // Join the game room
+      socket.join(gameId);
 
       socket.emit("gameCreated", {
         gameId,
@@ -248,9 +277,11 @@ io.on("connection", (socket: Socket) => {
           data.betId ? `, BetId: ${data.betId}` : ""
         }`
       );
+      console.log(`   Player 1 (White) socketId: ${socket.id}`);
+      console.log(`   Player 1 joined room: ${gameId}`);
     } catch (error: any) {
       console.error("❌ Error creating game:", error);
-      socket.emit("error", error.message);
+      emitError(socket, error.message || "Failed to create game");
     }
   });
 
@@ -260,17 +291,17 @@ io.on("connection", (socket: Socket) => {
       const game = games.get(data.gameId);
 
       if (!game) {
-        socket.emit("error", "Game not found");
+        emitError(socket, "Game not found");
         return;
       }
 
       if (game.player2.socketId) {
-        socket.emit("error", "Game is full");
+        emitError(socket, "Game is full");
         return;
       }
 
       if (game.status !== "waiting") {
-        socket.emit("error", "Game is not accepting players");
+        emitError(socket, "Game is not accepting players");
         return;
       }
 
@@ -279,16 +310,24 @@ io.on("connection", (socket: Socket) => {
         const betDetails = await getBetDetails(game.betId);
 
         if (!betDetails) {
-          socket.emit("error", "Bet not found");
+          emitError(socket, "Bet not found");
           return;
         }
 
-        if (
-          betDetails.player1.toLowerCase() !==
-            data.playerAddress.toLowerCase() &&
-          betDetails.player2.toLowerCase() !== data.playerAddress.toLowerCase()
-        ) {
-          socket.emit("error", "You are not part of this bet");
+        console.log(`🔍 Verifying player for bet ${game.betId}:`);
+        console.log(`   Player address: ${data.playerAddress.toLowerCase()}`);
+        console.log(`   Bet player1: ${betDetails.player1.toLowerCase()}`);
+        console.log(`   Bet player2: ${betDetails.player2.toLowerCase()}`);
+        console.log(`   Bet status: ${betDetails.status}`);
+
+        const isPlayer1 =
+          betDetails.player1.toLowerCase() === data.playerAddress.toLowerCase();
+        const isPlayer2 =
+          betDetails.player2.toLowerCase() === data.playerAddress.toLowerCase();
+
+        // Player must be either player1 or player2 (transaction is now confirmed)
+        if (!isPlayer1 && !isPlayer2) {
+          emitError(socket, "You are not part of this bet");
           return;
         }
       }
@@ -302,6 +341,9 @@ io.on("connection", (socket: Socket) => {
         addressToSocket.set(data.playerAddress.toLowerCase(), socket.id);
       }
 
+      // Join the game room
+      socket.join(data.gameId);
+
       // Notify player who joined
       socket.emit("gameJoined", {
         gameId: data.gameId,
@@ -310,22 +352,31 @@ io.on("connection", (socket: Socket) => {
         betId: game.betId,
       });
 
-      // Notify opponent
+      // Notify opponent (player1)
       io.to(game.player1.socketId).emit("opponentJoined", {
         opponentSocketId: socket.id,
         opponentAddress: data.playerAddress,
       });
 
-      // Broadcast game started
-      io.to(game.player1.socketId).to(socket.id).emit("gameStarted", {
+      console.log(
+        `   🔔 Sent opponentJoined to Player 1 (${game.player1.socketId})`
+      );
+
+      // Broadcast game started to both players in the room
+      io.to(data.gameId).emit("gameStarted", {
         gameId: data.gameId,
         betId: game.betId,
       });
 
-      console.log(`✅ Player joined game: ${data.gameId}`);
+      console.log(
+        `✅ Player joined game: ${data.gameId} - Game is now active!`
+      );
+      console.log(`   Player 1 (White) socketId: ${game.player1.socketId}`);
+      console.log(`   Player 2 (Black) socketId: ${socket.id}`);
+      console.log(`   Both players in room: ${data.gameId}`);
     } catch (error: any) {
       console.error("❌ Error joining game:", error);
-      socket.emit("error", error.message);
+      emitError(socket, error.message || "Failed to join game");
     }
   });
 
@@ -364,13 +415,9 @@ io.on("connection", (socket: Socket) => {
       if (result) {
         game.moves.push(result.san);
 
-        // Broadcast move to both players
-        io.to(game.player1.socketId)
-          .to(game.player2.socketId)
-          .emit("move", result);
-        io.to(game.player1.socketId)
-          .to(game.player2.socketId)
-          .emit("boardState", game.chess.fen());
+        // Broadcast move to all players in the game room
+        io.to(gameId).emit("move", result);
+        io.to(gameId).emit("boardState", game.chess.fen());
 
         console.log(`♟️  Move in ${gameId}: ${result.from} -> ${result.to}`);
 
@@ -382,14 +429,12 @@ io.on("connection", (socket: Socket) => {
           game.reason = "checkmate";
           game.endTime = Date.now();
 
-          io.to(game.player1.socketId)
-            .to(game.player2.socketId)
-            .emit("gameOver", {
-              gameId,
-              winner,
-              reason: "checkmate",
-              betId: game.betId,
-            });
+          io.to(gameId).emit("gameOver", {
+            gameId,
+            winner,
+            reason: "checkmate",
+            betId: game.betId,
+          });
 
           console.log(`🏁 Game Over: ${winner} wins by checkmate`);
 
@@ -422,12 +467,10 @@ io.on("connection", (socket: Socket) => {
                 "❌ Error declaring winner on blockchain:",
                 error.message
               );
-              io.to(game.player1.socketId)
-                .to(game.player2.socketId)
-                .emit("blockchainError", {
-                  message: "Failed to declare winner on blockchain",
-                  error: error.message,
-                });
+              io.to(gameId).emit("blockchainError", {
+                message: "Failed to declare winner on blockchain",
+                error: error.message,
+              });
             }
           }
         } else if (game.chess.isDraw()) {
@@ -436,14 +479,12 @@ io.on("connection", (socket: Socket) => {
           game.reason = "draw";
           game.endTime = Date.now();
 
-          io.to(game.player1.socketId)
-            .to(game.player2.socketId)
-            .emit("gameOver", {
-              gameId,
-              winner: null,
-              reason: "draw",
-              betId: game.betId,
-            });
+          io.to(gameId).emit("gameOver", {
+            gameId,
+            winner: null,
+            reason: "draw",
+            betId: game.betId,
+          });
 
           console.log(`🏁 Game Over: Draw`);
 
@@ -453,12 +494,10 @@ io.on("connection", (socket: Socket) => {
               console.log(`🔗 Declaring draw on blockchain...`);
               await declareDraw(game.betId);
 
-              io.to(game.player1.socketId)
-                .to(game.player2.socketId)
-                .emit("betResolved", {
-                  betId: game.betId,
-                  result: "draw",
-                });
+              io.to(gameId).emit("betResolved", {
+                betId: game.betId,
+                result: "draw",
+              });
 
               console.log(`✅ Draw declared on blockchain`);
             } catch (error: any) {
@@ -466,16 +505,14 @@ io.on("connection", (socket: Socket) => {
                 "❌ Error declaring draw on blockchain:",
                 error.message
               );
-              io.to(game.player1.socketId)
-                .to(game.player2.socketId)
-                .emit("blockchainError", {
-                  message: "Failed to declare draw on blockchain",
-                  error: error.message,
-                });
+              io.to(gameId).emit("blockchainError", {
+                message: "Failed to declare draw on blockchain",
+                error: error.message,
+              });
             }
           }
         } else if (game.chess.isCheck()) {
-          io.to(game.player1.socketId).to(game.player2.socketId).emit("check");
+          io.to(gameId).emit("check");
           console.log(`⚠️  Check!`);
         }
       } else {
@@ -502,10 +539,8 @@ io.on("connection", (socket: Socket) => {
     game.winner = undefined;
     game.reason = undefined;
 
-    io.to(game.player1.socketId).to(game.player2.socketId).emit("gameReset");
-    io.to(game.player1.socketId)
-      .to(game.player2.socketId)
-      .emit("boardState", game.chess.fen());
+    io.to(gameId).emit("gameReset");
+    io.to(gameId).emit("boardState", game.chess.fen());
 
     console.log(`🔄 Game reset: ${gameId}`);
   });
