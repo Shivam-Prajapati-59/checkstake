@@ -9,8 +9,7 @@ const ABI = [
 
 const CONTRACT_ADDRESS = "0x4751Da03f8FC0A5DBBaf738B8BBCCd87694c11e3";
 const RPC_URL = "https://testnet-rpc.monad.xyz/";
-const OWNER_PRIVATE_KEY =
-  "74b6f20a44536c6f47eef19116e49c87ec74a32a8374376f56ac8232ed55cfb6";
+const OWNER_PRIVATE_KEY = "0xYOUR_OWNER_PRIVATE_KEY_HERE"; // Replace with the owner's private key
 
 // Configuration
 const TEST_BET_ID = 4; // Using active bet
